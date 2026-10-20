@@ -1,6 +1,6 @@
 // Service Worker: caches the whole app (including the AI model) for offline use.
 // Bump VERSION whenever any file below changes so clients pick up the update.
-const VERSION = "v1";
+const VERSION = "v2";
 const CACHE = `face-mosaic-${VERSION}`;
 const FILES = [
   "./",
@@ -30,9 +30,22 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-// Cache first; fall back to network for anything not precached.
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
+  // The page itself: network first so fixes show up immediately when online.
+  if (e.request.mode === "navigate") {
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put("index.html", copy));
+          return res;
+        })
+        .catch(() => caches.match("index.html"))
+    );
+    return;
+  }
+  // Everything else (library, model, icons): cache first.
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || fetch(e.request))
   );

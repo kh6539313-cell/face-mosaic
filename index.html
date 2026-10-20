@@ -265,17 +265,13 @@ function getDetector() {
       // Imported lazily so the UI works even while the library is still downloading.
       const { FilesetResolver, FaceDetector } = await import(LIB_URL);
       const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
-      const opts = (delegate) => ({
-        baseOptions: { modelAssetPath: MODEL_URL, delegate },
+      // CPU only: the GPU delegate silently returns no faces on some Android
+      // GPUs, and for this tiny model the CPU is just as fast.
+      return await FaceDetector.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
         runningMode: "IMAGE",
         minDetectionConfidence: confidence(),
       });
-      try {
-        return await FaceDetector.createFromOptions(fileset, opts("GPU"));
-      } catch (e) {
-        console.warn("GPU delegate failed, falling back to CPU", e);
-        return await FaceDetector.createFromOptions(fileset, opts("CPU"));
-      }
     })();
     detectorPromise.then(() => { detectorReady = true; }, () => { detectorPromise = null; });
   }
@@ -438,7 +434,10 @@ async function redetect() {
     showCount();
   } catch (e) {
     console.error(e);
-    if (seq === detectSeq) setStatus('<span class="err">顔検出に失敗しました。ページを再読み込みしてください。</span>');
+    if (seq === detectSeq) {
+      const msg = String(e?.message || e).replace(/[<>&]/g, "");
+      setStatus(`<span class="err">顔検出に失敗しました。ページを再読み込みしてください。（${msg}）</span>`);
+    }
   }
 }
 
