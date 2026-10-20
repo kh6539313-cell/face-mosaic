@@ -1,6 +1,6 @@
 // Service Worker: caches the whole app (including the AI model) for offline use.
 // Bump VERSION whenever any file below changes so clients pick up the update.
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = `face-mosaic-${VERSION}`;
 const FILES = [
   "./",

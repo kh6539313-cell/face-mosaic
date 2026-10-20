@@ -160,7 +160,7 @@
     <section class="stage">
       <div id="status"><span class="spinner"></span><span id="statusText"></span></div>
       <div class="canvas-wrap"><canvas id="view"></canvas></div>
-      <p class="hint">枠をクリック：モザイクのON/OFF ・ ドラッグ：範囲を追加 ・ Delete：選択中の枠を削除</p>
+      <p class="hint">枠をクリック：ON/OFF ・ 枠をドラッグ：移動 ・ 角をドラッグ：大きさ変更 ・ 何もない所をドラッグ：範囲を追加 ・ Delete：選択中の枠を削除</p>
     </section>
 
     <aside>
@@ -423,9 +423,15 @@ async function redetect() {
     if (seq !== detectSeq) return;
     state.faces = faces;
     // Keep manual regions, replace auto ones.
+    // Keep manual / hand-adjusted regions, and skip detections they already cover.
     const manual = state.regions.filter(r => !r.auto);
+    const covered = (b) => manual.some(m => {
+      const ix = Math.max(0, Math.min(b.x + b.w, m.x + m.w) - Math.max(b.x, m.x));
+      const iy = Math.max(0, Math.min(b.y + b.h, m.y + m.h) - Math.max(b.y, m.y));
+      return ix * iy / Math.min(b.w * b.h, m.w * m.h) > 0.5;
+    });
     state.regions = [
-      ...faces.map((f, i) => ({ ...padFace(f), on: true, auto: true, faceIndex: i })),
+      ...faces.map((f, i) => ({ ...padFace(f), on: true, auto: true, faceIndex: i })).filter(r => !covered(r)),
       ...manual,
     ];
     state.selected = -1;
@@ -535,8 +541,22 @@ function drawFrames(g) {
     g.fillText(label, r.x + 4 * k, ly + th / 2);
     g.restore();
   });
+  // corner handles on the selected region
+  const s = state.regions[state.selected];
+  if (s) {
+    const hs = 9 * k;
+    g.save();
+    g.fillStyle = "#fff";
+    g.strokeStyle = accent;
+    g.lineWidth = 2 * k;
+    for (const [cx, cy] of [[s.x, s.y], [s.x + s.w, s.y], [s.x, s.y + s.h], [s.x + s.w, s.y + s.h]]) {
+      g.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
+      g.strokeRect(cx - hs / 2, cy - hs / 2, hs, hs);
+    }
+    g.restore();
+  }
   const d = state.drag;
-  if (d && d.moved) {
+  if (d && d.moved && d.mode === "new") {
     const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
     g.save();
     g.lineWidth = 2 * k;
@@ -567,41 +587,96 @@ function toImage(e) {
     y: (e.clientY - rect.top) * (view.height / rect.height),
   };
 }
+// Regions in hit-test priority: the selected one first, then topmost first.
+function hitOrder() {
+  const order = [];
+  if (state.selected >= 0) order.push(state.selected);
+  for (let i = state.regions.length - 1; i >= 0; i--) if (i !== state.selected) order.push(i);
+  return order;
+}
 function hitTest(p) {
-  for (let i = state.regions.length - 1; i >= 0; i--) {
+  for (const i of hitOrder()) {
     const r = state.regions[i];
     if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return i;
   }
   return -1;
 }
+// Corner of any region within grab distance (bigger for fingers).
+function hitCorner(p, pointerType) {
+  const k = view.width / Math.max(1, view.getBoundingClientRect().width);
+  const tol = (pointerType === "touch" ? 22 : 12) * k;
+  for (const i of hitOrder()) {
+    const r = state.regions[i];
+    const corners = { nw: [r.x, r.y], ne: [r.x + r.w, r.y], sw: [r.x, r.y + r.h], se: [r.x + r.w, r.y + r.h] };
+    for (const [name, [cx, cy]] of Object.entries(corners)) {
+      if (Math.abs(p.x - cx) <= tol && Math.abs(p.y - cy) <= tol) return { i, corner: name };
+    }
+  }
+  return null;
+}
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 view.addEventListener("pointerdown", (e) => {
   if (!state.img || e.button !== 0) return;
   view.setPointerCapture(e.pointerId);
   const p = toImage(e);
-  state.drag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, moved: false, hit: hitTest(p), cx: e.clientX, cy: e.clientY };
+  const d = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, moved: false, cx: e.clientX, cy: e.clientY, mode: "new", hit: -1 };
+  const c = hitCorner(p, e.pointerType);
+  if (c) {
+    Object.assign(d, { mode: "resize", hit: c.i, corner: c.corner });
+  } else {
+    const i = hitTest(p);
+    if (i >= 0) Object.assign(d, { mode: "move", hit: i });
+  }
+  if (d.hit >= 0) d.orig = { ...state.regions[d.hit] };
+  state.drag = d;
 });
 view.addEventListener("pointermove", (e) => {
   const d = state.drag;
   if (!d) {
-    if (state.img) view.style.cursor = hitTest(toImage(e)) >= 0 ? "pointer" : "crosshair";
+    if (!state.img) return;
+    const p = toImage(e);
+    const c = hitCorner(p, e.pointerType);
+    view.style.cursor = c ? (c.corner === "nw" || c.corner === "se" ? "nwse-resize" : "nesw-resize")
+      : hitTest(p) >= 0 ? "move" : "crosshair";
     return;
   }
   const p = toImage(e);
-  d.x1 = Math.max(0, Math.min(view.width, p.x));
-  d.y1 = Math.max(0, Math.min(view.height, p.y));
+  d.x1 = clamp(p.x, 0, view.width);
+  d.y1 = clamp(p.y, 0, view.height);
   if (Math.hypot(e.clientX - d.cx, e.clientY - d.cy) > 5) d.moved = true;
-  if (d.moved) render();
+  if (!d.moved) return;
+
+  if (d.mode === "move" || d.mode === "resize") {
+    const r = state.regions[d.hit], o = d.orig;
+    if (d.mode === "move") {
+      r.x = clamp(o.x + d.x1 - d.x0, 0, view.width - o.w);
+      r.y = clamp(o.y + d.y1 - d.y0, 0, view.height - o.h);
+    } else {
+      // the opposite corner stays fixed
+      const fx = d.corner.includes("w") ? o.x + o.w : o.x;
+      const fy = d.corner.includes("n") ? o.y + o.h : o.y;
+      r.x = Math.min(fx, d.x1); r.y = Math.min(fy, d.y1);
+      r.w = Math.max(8, Math.abs(d.x1 - fx)); r.h = Math.max(8, Math.abs(d.y1 - fy));
+    }
+    // once adjusted by hand, padding changes / re-detection leave it alone
+    r.auto = false;
+    state.selected = d.hit;
+    updateButtons();
+  }
+  render();
 });
 function endDrag() {
   const d = state.drag;
   state.drag = null;
   if (!d) return;
   if (d.moved) {
-    const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
-    if (w > 4 && h > 4) {
-      state.regions.push({ x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w, h, on: true, auto: false });
-      state.selected = state.regions.length - 1;
+    if (d.mode === "new") {
+      const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
+      if (w > 4 && h > 4) {
+        state.regions.push({ x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w, h, on: true, auto: false });
+        state.selected = state.regions.length - 1;
+      }
     }
   } else if (d.hit >= 0) {
     state.regions[d.hit].on = !state.regions[d.hit].on;
