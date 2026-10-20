@@ -1,0 +1,16 @@
+{
+  "name": "顔モザイク",
+  "short_name": "顔モザイク",
+  "description": "画像の顔をAIで自動検出してモザイクをかけるアプリ（オフライン対応）",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f6f4",
+  "theme_color": "#ff4d6d",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
