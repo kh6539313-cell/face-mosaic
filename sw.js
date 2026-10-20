@@ -1,16 +1,21 @@
 // Service Worker: caches the whole app (including the AI model) for offline use.
 // Bump VERSION whenever any file below changes so clients pick up the update.
-const VERSION = "v3";
+const VERSION = "v4";
 const CACHE = `face-mosaic-${VERSION}`;
 const FILES = [
   "./",
   "index.html",
   "manifest.json",
+  "js/main.js",
+  "js/core.js",
+  "js/image.js",
+  "js/video.js",
   "icons/icon-180.png",
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/icon-512-maskable.png",
   "vendor/vision_bundle.mjs",
+  "vendor/mediabunny.min.mjs",
   "vendor/blaze_face_short_range.tflite",
   "vendor/wasm/vision_wasm_internal.js",
   "vendor/wasm/vision_wasm_internal.wasm",
